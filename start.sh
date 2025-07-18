@@ -31,7 +31,7 @@ fi
 
 echo -e "${BLUE}🔧 Activating virtual environment and installing backend dependencies...${NC}"
 source venv/bin/activate
-pip install -r requirements.txt
+pip3 install -r requirements.txt
 
 # Function to cleanup background processes on exit
 cleanup() {

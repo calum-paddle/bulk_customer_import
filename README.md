@@ -22,16 +22,41 @@ A modern web application for importing customers in bulk to Paddle using their A
 
 ## Setup
 
-### 1. Install Frontend Dependencies
+### Option 1: Quick Setup (Recommended)
+
+**On macOS/Linux**:
+
+```bash
+./setup.sh
+```
+
+**On Windows**:
+
+```bash
+setup.bat
+```
+
+This will automatically:
+
+- Check for Python3 and Node.js
+- Install frontend dependencies (npm install)
+- Create a Python virtual environment
+- Install backend dependencies (pip3 install)
+
+### Option 2: Manual Setup
+
+#### 1. Install Frontend Dependencies
 
 ```bash
 npm install
 ```
 
-### 2. Install Backend Dependencies
+#### 2. Install Backend Dependencies
 
 ```bash
-pip install -r requirements.txt
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip3 install -r requirements.txt  # On Windows: pip install -r requirements.txt
 ```
 
 ## Running the Application
