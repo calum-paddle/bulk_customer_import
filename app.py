@@ -74,7 +74,9 @@ def import_customers():
                 'total_records': len(data),
                 'successful': 0,
                 'failed': 0,
-                'errors': []
+                'errors': [],
+                'successful_transactions': [],
+                'failed_transactions': []
             }
             
             # Process each row
@@ -163,6 +165,86 @@ def import_customers():
                             results['errors'].append(error_msg)
                         else:
                             print(f"✅ Created business for customer {customer_id}")
+
+                    # 4. Create transaction
+                    try:
+                        # Get address_id and business_id if they were created
+                        address_id = None
+                        business_id = None
+                        
+                        # Get address_id if address was created
+                        if clean_value(row.get('address_country_code')):
+                            address_response = requests.get(f"{API_URL}/customers/{customer_id}/addresses", headers=HEADERS)
+                            if address_response.status_code == 200:
+                                addresses = address_response.json()['data']
+                                if addresses:
+                                    address_id = addresses[0]['id']
+                        
+                        # Get business_id if business was created
+                        if clean_value(row.get('business_name')):
+                            business_response = requests.get(f"{API_URL}/customers/{customer_id}/businesses", headers=HEADERS)
+                            if business_response.status_code == 200:
+                                businesses = business_response.json()['data']
+                                if businesses:
+                                    business_id = businesses[0]['id']
+
+                        # Prepare transaction payload
+                        transaction_payload = {
+                            "customer_id": customer_id,
+                            "items": [
+                                {
+                                    "price_id": clean_value(row.get('zero_dollar_sub_price_id')),
+                                    "quantity": 1
+                                }
+                            ]
+                        }
+
+                        # Add address_id and business_id if available
+                        if address_id:
+                            transaction_payload["address_id"] = address_id
+                        if business_id:
+                            transaction_payload["business_id"] = business_id
+
+                        # Add billing period if dates are provided
+                        if clean_value(row.get('current_period_started_at')) and clean_value(row.get('current_period_ends_at')):
+                            transaction_payload["billing_period"] = {
+                                "starts_at": clean_value(row['current_period_started_at']),
+                                "ends_at": clean_value(row['current_period_ends_at'])
+                            }
+
+                        print(f"💳 Creating transaction for customer {customer_id}")
+                        print(f"📦 Transaction payload: {transaction_payload}")
+                        response = requests.post(f"{API_URL}/transactions", headers=HEADERS, json=transaction_payload)
+                        print(f"📥 Transaction response status: {response.status_code}")
+
+                        if response.status_code == 201:
+                            transaction_data = response.json()['data']
+                            transaction_id = transaction_data.get('id')
+                            checkout_url = transaction_data.get('checkout', {}).get('url')
+                            
+                            results['successful_transactions'].append({
+                                'customer_email': clean_value(row['customer_email']),
+                                'transaction_id': transaction_id,
+                                'checkout_url': checkout_url
+                            })
+                            print(f"✅ Created transaction for customer {customer_id}")
+                        else:
+                            error_msg = f"Failed to create transaction for {row['customer_email']}: {response.text}"
+                            print(f"❌ {error_msg}")
+                            results['failed_transactions'].append({
+                                'customer_email': clean_value(row['customer_email']),
+                                'error': response.text
+                            })
+                            results['errors'].append(error_msg)
+                    
+                    except Exception as e:
+                        error_msg = f"Error creating transaction for {row['customer_email']}: {str(e)}"
+                        print(f"❌ {error_msg}")
+                        results['failed_transactions'].append({
+                            'customer_email': clean_value(row['customer_email']),
+                            'error': str(e)
+                        })
+                        results['errors'].append(error_msg)
                 
                 except Exception as e:
                     results['errors'].append(f"Error processing row {index + 1}: {str(e)}")
@@ -181,6 +263,34 @@ def import_customers():
                 os.unlink(csv_path)
             raise e
             
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/download-csv', methods=['POST'])
+def download_csv():
+    try:
+        data = request.json
+        csv_type = data.get('type')  # 'success' or 'failed'
+        csv_data = data.get('data', [])
+        
+        if csv_type == 'success':
+            # Create successful transactions CSV
+            df = pd.DataFrame(csv_data)
+            csv_content = df.to_csv(index=False)
+            filename = 'successful_transactions.csv'
+        elif csv_type == 'failed':
+            # Create failed transactions CSV
+            df = pd.DataFrame(csv_data)
+            csv_content = df.to_csv(index=False)
+            filename = 'failed_transactions.csv'
+        else:
+            return jsonify({'error': 'Invalid CSV type'}), 400
+        
+        return jsonify({
+            'csv_content': csv_content,
+            'filename': filename
+        })
+        
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

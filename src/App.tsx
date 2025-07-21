@@ -15,6 +15,7 @@ function App() {
   const [progress, setProgress] = useState(0);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [dragOver, setDragOver] = useState(false);
+  const [importResults, setImportResults] = useState<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const addLog = (type: 'success' | 'error' | 'info', message: string) => {
@@ -109,6 +110,15 @@ function App() {
         addLog('error', `❌ Failed: ${result.failed} customers`);
       }
 
+      // Log transaction results
+      if (result.successful_transactions && result.successful_transactions.length > 0) {
+        addLog('success', `💳 Successful transactions: ${result.successful_transactions.length}`);
+      }
+      
+      if (result.failed_transactions && result.failed_transactions.length > 0) {
+        addLog('error', `❌ Failed transactions: ${result.failed_transactions.length}`);
+      }
+
       if (result.errors && result.errors.length > 0) {
         addLog('info', 'Error details:');
         result.errors.slice(0, 5).forEach((error: string) => {
@@ -118,6 +128,9 @@ function App() {
           addLog('info', `... and ${result.errors.length - 5} more errors`);
         }
       }
+
+      // Store results for CSV download
+      setImportResults(result);
       
     } catch (error) {
       addLog('error', `Import failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -146,7 +159,10 @@ function App() {
       'business_name',
       'business_company_number',
       'business_tax_identifier',
-      'business_external_id'
+      'business_external_id',
+      'current_period_started_at',
+      'current_period_ends_at',
+      'zero_dollar_sub_price_id' // NEW required column
     ];
     
     const exampleData = [
@@ -163,7 +179,10 @@ function App() {
       'Acme Corp',
       '123456789',
       'GB123456789',
-      'BIZ001'
+      'BIZ001',
+      '2024-06-31T15:32:00Z',
+      '2024-07-31T15:32:00Z',
+      'pri_1234567890' // Example price ID
     ];
     
     const csvContent = [
@@ -182,6 +201,51 @@ function App() {
     window.URL.revokeObjectURL(url);
     
     addLog('info', 'CSV template downloaded successfully');
+  };
+
+  const downloadResultsCSV = async (type: 'success' | 'failed') => {
+    if (!importResults) return;
+    
+    try {
+      const data = type === 'success' ? importResults.successful_transactions : importResults.failed_transactions;
+      
+      if (!data || data.length === 0) {
+        addLog('info', `No ${type} transactions to download`);
+        return;
+      }
+
+      const response = await fetch('http://localhost:5001/api/download-csv', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          type,
+          data
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to generate CSV');
+      }
+
+      const result = await response.json();
+      
+      // Create and download the CSV file
+      const blob = new Blob([result.csv_content], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = result.filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+      
+      addLog('success', `${type === 'success' ? 'Successful' : 'Failed'} transactions CSV downloaded`);
+    } catch (error) {
+      addLog('error', `Failed to download ${type} CSV: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   };
 
   return (
@@ -329,6 +393,33 @@ function App() {
             ))}
           </div>
         )}
+
+        {importResults && (
+          <div className="download-section">
+            <h3>Download Results</h3>
+            <div className="download-buttons">
+              {importResults.successful_transactions && importResults.successful_transactions.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => downloadResultsCSV('success')}
+                  className="download-button success"
+                >
+                  📥 Download Successful Transactions ({importResults.successful_transactions.length})
+                </button>
+              )}
+              
+              {importResults.failed_transactions && importResults.failed_transactions.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => downloadResultsCSV('failed')}
+                  className="download-button failed"
+                >
+                  📥 Download Failed Transactions ({importResults.failed_transactions.length})
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="csv-requirements">
@@ -351,6 +442,9 @@ function App() {
           <li><strong>business_company_number</strong> - Optional: Company number</li>
           <li><strong>business_tax_identifier</strong> - Optional: Tax identifier</li>
           <li><strong>business_external_id</strong> - Optional: External business ID</li>
+          <li><strong>current_period_started_at</strong> - Required: Subscription period start (format: 2024-06-31T15:32:00Z)</li>
+          <li><strong>current_period_ends_at</strong> - Required: Subscription period end (format: 2024-06-31T15:32:00Z)</li>
+          <li><strong>zero_dollar_sub_price_id</strong> - Required: Paddle price ID for the $0 subscription (format: pri_xxxxxxxxxx)</li>
         </ul>
       </div>
     </div>
